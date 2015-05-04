@@ -3,7 +3,7 @@ AO Image Reduction and Analysis Scripts
 
 Use these scripts to reduce data. Use the following steps:
 
-  1. python classify.py N*.fits
+  1. python classify.py N*.fits --skip-first
   2. cat FLAT*.list DARK.list > CALS.list
   3. cat OBJECT*.list > SCI.list
   4. Process calibration frames:
