@@ -18,7 +18,8 @@ def fit_gaussian_psf(data, x_mean=512, y_mean=512, x_stddev=3, y_stddev=3):
     returns: A 2d numpy array with the gaussian model of the data
     """
     YY, XX = np.indices(data.shape)
-    p_init = models.Gaussian2D(amplitude=data[x_mean][y_mean], 
+    XX, YY = np.indices(data.shape)
+    p_init = models.Gaussian2D(amplitude=data[y_mean][x_mean], 
                                x_mean=x_mean, y_mean=y_mean, 
                                x_stddev=x_stddev, y_stddev=y_stddev)
     fitter = fitting.LevMarLSQFitter()
@@ -54,7 +55,8 @@ def fit_moffat_psf(data, x_mean=512, y_mean=512, x_fwhm=6, y_fwhm=6):
     $\Beta$ is the atmospheric scattering coefficient.
     """
     YY, XX = np.indices(data.shape)
-    p_init = Moffat2D(amplitude=data[x_mean][y_mean], 
+    XX, YY = np.indices(data.shape)
+    p_init = Moffat2D(amplitude=data[y_mean][x_mean], 
                       x_0=x_mean, y_0=y_mean, 
                       x_gamma=6.0, y_gamma=6.0, alpha=1.0)
 
