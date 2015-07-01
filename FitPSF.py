@@ -5,9 +5,11 @@ import matplotlib.pyplot as plt
 from photutils import aperture_photometry, CircularAperture, CircularAnnulus
 from photutils.geometry import circular_overlap_grid
 from photutils.aperture_funcs import get_phot_extents
-from matplotlib.colors import SymLogNorm
+from matplotlib.colors import SymLogNorm, NoNorm
 from matplotlib import cm
+from scipy.interpolate import CloughTocher2DInterpolator
 import sys
+import os
 
 
 def fit_gaussian_psf(data, x_mean=512, y_mean=512, x_stddev=3, y_stddev=3):
@@ -25,7 +27,7 @@ def fit_gaussian_psf(data, x_mean=512, y_mean=512, x_stddev=3, y_stddev=3):
     fitter = fitting.LevMarLSQFitter()
     gauss = fitter(p_init, XX, YY, data)
 
-    return gauss, gauss(XX, YY)
+    return gauss, gauss(XX, YY), [gauss.x_mean.value, gauss.y_mean.value]
 
 
 @models.custom_model
@@ -63,11 +65,11 @@ def fit_moffat_psf(data, x_mean=512, y_mean=512, x_fwhm=6, y_fwhm=6):
     fitter = fitting.LevMarLSQFitter()
     moffat = fitter(p_init, XX, YY, data)
 
-    return moffat, moffat(XX, YY)
+    return moffat, moffat(XX, YY), [moffat.x_0.value, moffat.y_0.value]
 
 
 
-def remove_concentric(data, x_mean=512, y_mean=512, x_stddev=3, y_stddev=3, Nsig=10, dp=0.1, gauss=None):
+def remove_concentric(data, x_mean=512, y_mean=512, x_stddev=3, y_stddev=3, Nsig=10, dp=0.1):
     """
     This function first fits a gaussian PSF to the data to find the centroid.
     Then, it subtracts concentric apertures from the data rather than just 
@@ -76,10 +78,8 @@ def remove_concentric(data, x_mean=512, y_mean=512, x_stddev=3, y_stddev=3, Nsig
     data = data.copy() # Don't overwrite the data
     nx, ny = data.shape
     
-    if gauss is None:
-        gauss, _ = fit_gaussian_psf(data, x_mean=x_mean, y_mean=y_mean, 
-                                    x_stddev=x_stddev, y_stddev=y_stddev)
-    centroid = [gauss.x_mean.value, gauss.y_mean.value]
+    gauss, psf, centroid = fit_gaussian_psf(data, x_mean=x_mean, y_mean=y_mean, 
+                                          x_stddev=x_stddev, y_stddev=y_stddev)
     std = (gauss.x_stddev.value + gauss.y_stddev.value)/2.0
     x0, y0 = centroid
     
@@ -118,7 +118,52 @@ def remove_concentric(data, x_mean=512, y_mean=512, x_stddev=3, y_stddev=3, Nsig
             inner = 0.0
         annulus_overlap = outer - inner
         psf[y_min[0]:y_max[0], x_min[0]:x_max[0]] += annulus_overlap * avg_flux
-    return data - psf, psf
+    return data - psf, psf, centroid
+
+
+def read_data(fname, rotate=True):
+    if rotate:
+        from skimage.transform import rotate
+        header = fits.getheader(fname)
+        angle = header['CRPA']
+        #montage_wrapper.wrappers.reproject(fname, 'tmp.fits', north_aligned=True, hdu=1, exact_size=True)
+        original_data = fits.getdata(fname, 1)
+        maxval, minval = original_data.max(), original_data.min()
+        scaled_data = (original_data - minval) / (maxval - minval)
+        rotated = rotate(scaled_data, -angle, order=3)
+        data = rotated * (maxval - minval) + minval
+    else:
+        data = fits.getdata(fname, 1)
+    return data[250:750, 250:750]
+
+
+def get_average_speckle_pattern(file_list, psf_fcn=remove_concentric, rotate=True, **psf_args):
+    """
+    Fit and subtract a PSF to each of the stars in file_list.
+    Then, use the average flux (after re-centering!) to determine the speckle pattern.
+
+    :param file_list: A list of filenames
+    :param psf_fcn: A callable that takes the data and psf_args, and returns the psf as the second argument
+    """
+    speckle_patterns = []
+    for fname in file_list:
+        data = read_data(fname, rotate=rotate)
+        _, psf, centroid = psf_fcn(data, **psf_args)
+
+        # interpolate the residuals
+        YY, XX = np.indices(data.shape)
+        points = np.vstack((XX.flatten(), YY.flatten()))
+        values = data.flatten()
+        spline = CloughTocher2DInterpolator(points, values)
+
+        # Evaluate the spline at its centroid +/- 100 pixels or so.
+        new_XX, new_YY = np.meshgrid(np.arange(centroid[0]-Npix, centroid[0]+Npix), 
+                                     np.arange(centroid[1]-Npix, centroid[1]+Npix))
+        new_points = np.vstack((new_XX.flatten(), new_YY.flatten()))
+        speckle_patterns.append(spline(new_points).reshape(new_XX.shape))
+
+    avg_speckle = np.mean(speckle_patterns)
+    return avg_speckle
 
 
 
@@ -146,20 +191,25 @@ def make_companion(data, x0, y0, sep=5.0, sig=3.0, delta_mag=3):
 
 
 
-def main():
-    # Compare the different fitting methods.
-    hdulist = fits.open(sys.argv[1])
-    data = hdulist[1].data
+def main(fname, rotate=True):
+    """ Compare the different fitting methods. """
+    data = read_data(fname, rotate=rotate)
 
     # Add a synthetic companion to the data
-    data += make_companion(data, 519, 509, sep=10, delta_mag=4)
+    #data += make_companion(data, 511, 511, sep=10, delta_mag=4)
 
-    gauss, gauss_psf = fit_gaussian_psf(data)
-    moffat, moffat_psf = fit_moffat_psf(data)
-    concentric, concentric_psf = remove_concentric(data.copy())
+    # Get the maximum value
+    maxidx = np.argmax(data)
+    YY, XX = np.indices(data.shape)
+    x0 = XX.flatten()[maxidx]
+    y0 = YY.flatten()[maxidx]
+
+    gauss, gauss_psf, _ = fit_gaussian_psf(data, x0, y0)
+    moffat, moffat_psf, _ = fit_moffat_psf(data, x0, y0)
+    concentric, concentric_psf, _ = remove_concentric(data.copy(), x0, y0)
 
     # Plot
-    limits = (512-20, 512+20)
+    limits = (x0-20, x0+20)
     fig1, ax1 = plt.subplots()
     fig2 = plt.figure(2)
     ax2 = fig2.add_subplot(111)
@@ -169,6 +219,7 @@ def main():
     ax4 = fig4.add_subplot(111)
 
     normalizer = SymLogNorm(linthresh=1e-3, linscale=0.2, clip=True)
+    normalizer = None
     colormap = cm.hot
     im1 = ax1.imshow(data[limits[0]:limits[1], limits[0]:limits[1]], cmap=colormap, norm=normalizer)
     #ax1.set_xlim(limits)
@@ -196,9 +247,16 @@ def main():
     ax4.set_title('Concentric Circles PSF subtracted')
     plt.colorbar(im4, ax=ax4)
 
-
-    plt.show()
+    # Save figure
+    basename = os.path.split(fname)[-1][:-5]
+    fig1.savefig('Figures/{}_Original.pdf'.format(basename))
+    fig2.savefig('Figures/{}_GaussianPSF.pdf'.format(basename))
+    fig3.savefig('Figures/{}_MoffatPSF.pdf'.format(basename))
+    fig4.savefig('Figures/{}_ConcentricPSF.pdf'.format(basename))
+    #plt.show()
+    plt.close('all')
 
 
 if __name__ == '__main__':
-    main()
+    for fname in sys.argv[1:]:
+        main(fname)
