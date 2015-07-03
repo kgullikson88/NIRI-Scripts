@@ -5,6 +5,8 @@ from astropy.io import fits
 import numpy as np
 import HelperFunctions
 import logging
+from progressbar import ProgressBar
+import sys
 
 
 
@@ -103,13 +105,25 @@ def map_significance(filename, ap_radius=2, Npix=100, data_hdu=0):
 
     # Get the significance at all coordinates. This is the slow part!
     significance = np.zeros(coords.shape[0])
-    for i, c in enumerate(coords):
-        sig = get_significance(c, fluxes, ap_radius)
-        significance[i] = sig
-        if i % 100 == 0:
-            logging.info('Done with pixel {}/{}'.format(i+1, significance.size))
+    # Make a progress bar
+    with ProgressBar(maxval=coords.shape[0]/10.0, redirect_stdout=True) as p:
+        for i, c in enumerate(coords):
+            sig = get_significance(c, fluxes, ap_radius)
+            significance[i] = sig
+            if i%10 == 0:
+                p.update(i/10)
 
     return significance.reshape(xx.shape)
+
+
+if __name__ == '__main__':
+    file_list = sys.argv[1:]
+    for fname in file_list:
+        header = fits.getheader(fname)
+        significance = map_significance(fname, Npix=400)
+        outfilename = '{}_significance_map.fits'.format(fname[:-5])
+        fits.writeto(outfilename, significance, header, clobber=True)
+        print('Done with file {}\n\n'.format(fname))
 
 
 
