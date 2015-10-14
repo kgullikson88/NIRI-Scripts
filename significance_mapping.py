@@ -29,6 +29,21 @@ def get_aperture_fluxes(data, ap_radius):
 
     return phot['aperture_sum'].data.reshape(data.shape)
 
+grid_cache = {}
+def get_circular_overlap(*args, **kwargs):
+    global grid_cache
+
+    key = list(args)
+    for arg in ['r', 'use_exact', 'subpixels']:
+        key.append(kwargs[arg])
+    key = tuple(key)
+    try:
+        retval = grid_cache[key]
+    except KeyError:
+        retval = circular_overlap_grid(*args, **kwargs)
+        grid_cache[key] = retval
+    return retval
+
 
 def get_significance(coord, ap_fluxes, ap_radius, center=None):
     """
@@ -63,19 +78,19 @@ def get_significance(coord, ap_fluxes, ap_radius, center=None):
     args = [x_pmin[0], x_pmax[0], y_pmin[0], y_pmax[0], x_max[0]-x_min[0], y_max[0]-y_min[0]]
 
     # Make an array giving the fraction each pixel gives to this radius
-    outer = circular_overlap_grid(*args, r=R+ap_radius, use_exact=1, subpixels=5)
+    kwargs = dict(r=R+ap_radius, use_exact=1, subpixels=5)
+    outer = get_circular_overlap(*args, **kwargs)
     if R - ap_radius < 1e-5:
         inner = 0.0
     else:
-        inner = circular_overlap_grid(*args, r=R-ap_radius, use_exact=1, subpixels=5)
+        kwargs = dict(r=R-ap_radius, use_exact=1, subpixels=5)
+        inner = get_circular_overlap(*args, **kwargs)
     annulus = np.zeros(ap_fluxes.shape)
     annulus[y_min[0]:y_max[0], x_min[0]:x_max[0]] = outer - inner
-
-    #avg_flux = np.mean((ap_fluxes*annulus)[annulus > 0])
-    #flux_std = np.std((ap_fluxes*annulus)[annulus > 0])
     
-    avg_flux = np.median((ap_fluxes*annulus)[annulus > 0])
-    flux_std = HelperFunctions.mad((ap_fluxes*annulus)[annulus > 0]) * 1.4826
+    flx = ap_fluxes[annulus > 0] * annulus[annulus > 0]
+    avg_flux = np.median(flx)
+    flux_std = np.median(np.abs(flx - avg_flux)) * 1.4826
 
     return (ap_fluxes[coord[0], coord[1]] - avg_flux) / flux_std
 
