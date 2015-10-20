@@ -5,7 +5,7 @@ do
     python cleanir.py $f
 done
 
-python classify.py --skip-first c*.fits
+python classify.py --skip-first cN*.fits
 
 for f in `cat OBJECT*.list`
 do

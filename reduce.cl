@@ -23,18 +23,18 @@ nprepare @SCI.list bpm=FLATFILE_bpm.pl
 #
 # Propagate saturated pixels to the next frames
 #
-!cat OBJECT*.list | xargs -I {} echo 'n'{} > SCI.list
-nresidual @SCI.list proptime=2
+#!cat OBJECT*.list | xargs -I {} echo 'n'{} > SCI.list
+nresidual n//@SCI.list proptime=3
 
 #
 # Reduce each star separately
 #
 !python classify.py b*.fits
 
-iraf.objmasks.convolve = ""
-iraf.nisky.ngrow = 20
-iraf.nisky.agrow = 5
-iraf.nisky.minpix = 10
+objmasks.convolve = ""
+nisky.ngrow = 20
+nisky.agrow = 5
+nisky.minpix = 10
 !echo "circle 512 512 150" > CN.dat
 !echo "circle 695 330 150" > LR.dat
 !echo "circle 325 330 150" > LL.dat
@@ -78,10 +78,9 @@ nisky  @OBJECT-{star}.list  outim=sky1  fl_keepmasks+
 # Re-generate a new sky and compare to the first:
 #nisky  @OBJECT-{star}.list  outim=sky2  fl_keepmasks+
 
-#nireduce  @OBJECT-{star}.list  skyim=sky2  flatim=flat
+#nireduce  @OBJECT-{star}.list  skyim=sky2  flatim=FLATFILE
 
-!python classify.py r*.fits
+#imcoadd r//@OBJECT-{star}.list outimage={star}.fits geofitgeom=shift alignmethod=wcs rotate- fl_over+ fl_scale+ fl_fixpix+ fl_find+ fl_map+ fl_trn+ fl_med+ fl_add+ fl_avg+ badpix=FLATFILE_bpm.fits niter=1 datamax=100000 fwhm=4
 
-#imcoadd @OBJECT-{star}.list outimage = {star}.fits geofitgeom=shift \ 
-  rotate- fl_over+ fl_scale+ fl_fixpix+ fl_find+ fl_map+ fl_trn+ fl_med+ \
-  fl_add+ fl_avg+ badpix=FLATFILE_bpm.fits niter=1 datamax=100000 fwhm=4
+# Clean up
+!rm *N2015*
