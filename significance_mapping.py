@@ -41,7 +41,7 @@ def get_circular_overlap(*args, **kwargs):
         retval = grid_cache[key]
     except KeyError:
         retval = circular_overlap_grid(*args, **kwargs)
-        grid_cache[key] = retval
+        #grid_cache[key] = retval
     return retval
 
 
